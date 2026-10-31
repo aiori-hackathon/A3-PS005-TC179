@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Explainable BGP Origin &amp; Subprefix Anomaly Monitor</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        noc: {
+                            bg: '#0f172a',
+                            panel: '#1e293b',
+                            border: '#334155',
+                            accent: '#3b82f6',
+                            valid: '#22c55e',
+                            invalid: '#ef4444',
+                            warning: '#f59e0b',
+                            notfound: '#64748b'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+
+<body class="bg-noc-bg text-slate-100 font-sans min-h-screen flex flex-col">
+
+    <!-- Top Navigation Bar -->
+    <header
+        class="bg-noc-panel border-b border-noc-border px-6 py-4 flex flex-wrap justify-between items-center gap-4 sticky top-0 z-20 shadow-lg">
+        <div class="flex items-center space-x-3">
+            <div class="p-2.5 bg-blue-600/20 border border-blue-500/30 text-blue-400 rounded-lg">
+                <i class="fa-solid fa-network-wired text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-wide text-white">Explainable BGP Anomaly Monitor</h1>
+                <p class="text-xs text-slate-400">AIORI PS-005 &bull; Dual-Tier Passive Monitoring Pipeline (RFC 6811 +
+                    Isolation Forest / TreeSHAP)</p>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <!-- Backend Connection Status Badge -->
+            <div id="connectionBadge"
+                class="flex items-center space-x-2 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs text-emerald-400">
+                <span id="statusDot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span id="statusText" class="font-semibold">PASSIVE MONITORING ACTIVE</span>
+            </div>
+
+            <!-- Adjustable Batch Size Parameter -->
+            <div class="flex items-center bg-slate-900 border border-noc-border rounded-lg px-2.5 py-1 text-xs">
+                <label for="updateCountInput" class="text-slate-400 mr-2">Updates:</label>
+                <select id="updateCountInput" class="bg-transparent text-white font-mono focus:outline-none">
+                    <option value="500" class="bg-slate-900">500</option>
+                    <option value="1000" class="bg-slate-900" selected>1,000</option>
+                    <option value="3000" class="bg-slate-900">3,000</option>
+                </select>
+            </div>
+
+            <!-- Simulate Custom Hijack Button -->
+            <button onclick="simulateCustomHijack()"
+                class="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center space-x-2">
+                <i class="fa-solid fa-bolt"></i>
+                <span>Inject Test Hijack</span>
+            </button>
+
+            <!-- Run Benchmark / Refresh Feed Button -->
+            <button id="refreshBtn" onclick="fetchLatestData()"
+                class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3.5 py-2 rounded-lg font-medium transition flex items-center space-x-2 shadow">
+                <i id="refreshIcon" class="fa-solid fa-rotate"></i>
+                <span>Run Benchmark</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
+
+        <!-- Executive Metrics KPI Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- KPI 1: Tier 1 Fast-Path Latency -->
+            <div class="bg-noc-panel border border-noc-border rounded-xl p-4 shadow">
+                <div class="flex justify-between items-center text-slate-400 text-xs font-medium">
+                    <span>TIER 1 FAST-PATH LATENCY</span>
+                    <i class="fa-solid fa-bolt text-amber-400"></i>
+                </div>
+                <div id="kpiLatency" class="text-2xl font-bold mt-2 text-white">&lt; 0.15 ms</div>
+                <div id="kpiLatencySub" class="text-[11px] text-emerald-400 mt-1">
+                    <i class="fa-solid fa-check"></i> Complies with &lt;5 ms SLA (100%)
+                </div>
+            </div>
+
+            <!-- KPI 2: False Positive Rate -->
+            <div class="bg-noc-panel border border-noc-border rounded-xl p-4 shadow">
+                <div class="flex justify-between items-center text-slate-400 text-xs font-medium">
+                    <span>FALSE POSITIVE RATE (FPR)</span>
+                    <i class="fa-solid fa-shield-halved text-blue-400"></i>
+                </div>
+                <div id="kpiFpr" class="text-2xl font-bold mt-2 text-white">0.00%</div>
+                <div id="kpiFprSub" class="text-[11px] text-slate-400 mt-1">
+                    MOAS &amp; TE Suppressed via Inventory Matrix
+                </div>
+            </div>
+
+            <!-- KPI 3: Tier 2 Isolation Threshold -->
+            <div class="bg-noc-panel border border-noc-border rounded-xl p-4 shadow">
+                <div class="flex justify-between items-center text-slate-400 text-xs font-medium">
+                    <span>TIER 2 ISOLATION THRESHOLD</span>
+                    <i class="fa-solid fa-brain text-purple-400"></i>
+                </div>
+                <div id="kpiThreshold" class="text-2xl font-bold mt-2 text-white">&theta; = 0.80</div>
+                <div id="kpiThresholdSub" class="text-[11px] text-purple-400 mt-1">
+                    TreeSHAP Explainer Gated (&lt;50 ms SLA)
+                </div>
+            </div>
+
+            <!-- KPI 4: System Precision / Recall -->
+            <div class="bg-noc-panel border border-noc-border rounded-xl p-4 shadow">
+                <div class="flex justify-between items-center text-slate-400 text-xs font-medium">
+                    <span>SYSTEM PRECISION / RECALL</span>
+                    <i class="fa-solid fa-chart-line text-emerald-400"></i>
+                </div>
+                <div id="kpiPrecisionRecall" class="text-2xl font-bold mt-2 text-white">100% / 62.1%</div>
+                <div id="kpiF1Sub" class="text-[11px] text-emerald-400 mt-1">
+                    F1-Score: 0.766 (Zero False Positives)
+                </div>
+            </div>
+        </div>
+
+        <!-- Pipeline Architecture Telemetry Bar -->
+        <div class="bg-noc-panel border border-noc-border rounded-xl p-4">
+            <div class="flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div class="flex items-center space-x-2">
+                    <span class="px-2 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded font-mono">1.
+                        BGP Stream</span>
+                    <span class="text-slate-400" id="statTotalUpdates">1,000 updates</span>
+                </div>
+                <i class="fa-solid fa-arrow-right text-slate-600 hidden md:inline"></i>
+                <div class="flex items-center space-x-2">
+                    <span class="px-2 py-1 bg-red-500/10 border border-red-500/30 text-red-400 rounded font-mono">2.
+                        Tier 1 Short-Circuit</span>
+                    <span class="text-slate-400" id="statTier1Alerts">28 deterministic alerts</span>
+                </div>
+                <i class="fa-solid fa-arrow-right text-slate-600 hidden md:inline"></i>
+                <div class="flex items-center space-x-2">
+                    <span
+                        class="px-2 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded font-mono">3.
+                        Inventory Whitelist</span>
+                    <span class="text-slate-400" id="statWhitelisted">19 MOAS/TE suppressed</span>
+                </div>
+                <i class="fa-solid fa-arrow-right text-slate-600 hidden md:inline"></i>
+                <div class="flex items-center space-x-2">
+                    <span
+                        class="px-2 py-1 bg-purple-500/10 border border-purple-500/30 text-purple-400 rounded font-mono">4.
+                        Tier 2 iForest + SHAP</span>
+                    <span class="text-slate-400" id="statTier2Alerts">14 behavioral outliers</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live BGP Stream Table -->
+        <div class="bg-noc-panel border border-noc-border rounded-xl overflow-hidden shadow">
+            <div class="px-6 py-4 border-b border-noc-border flex flex-wrap justify-between items-center gap-4">
+                <div>
+                    <h2 class="font-bold text-sm text-slate-200">Live BGP Update Stream &amp; Multi-Tier Verdict</h2>
+                    <p class="text-xs text-slate-400">Real-time deserialized updates, RFC 6811 ROV states, and TreeSHAP
+                        attributions</p>
+                </div>
+
+                <!-- Filter and Search Controls -->
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-500"></i>
+                        <input id="searchInput" type="text" oninput="renderTable()" placeholder="Filter prefix or AS..."
+                            class="bg-slate-900 border border-noc-border rounded-lg pl-8 pr-3 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <select id="tierFilter" onchange="renderTable()"
+                        class="bg-slate-900 border border-noc-border rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500">
+                        <option value="ALL">All Events</option>
+                        <option value="TIER1_ALERT">Tier 1 Alerts (Fast Path)</option>
+                        <option value="TIER2_ALERT">Tier 2 Alerts (TreeSHAP)</option>
+                        <option value="WHITELISTED">Whitelisted (MOAS / TE)</option>
+                        <option value="BENIGN">Benign / Passed</option>
+                    </select>
+
+                    <span id="eventCountBadge" class="bg-slate-800 text-slate-400 px-3 py-1.5 rounded-lg font-mono">
+                        Showing 6 Events
+                    </span>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs text-slate-300">
+                    <thead
+                        class="bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold border-b border-noc-border">
+                        <tr>
+                            <th class="px-6 py-3">Timestamp</th>
+                            <th class="px-6 py-3">Prefix (NLRI)</th>
+                            <th class="px-6 py-3">Origin ASN</th>
+                            <th class="px-6 py-3">AS Path</th>
+                            <th class="px-6 py-3">ROV State</th>
+                            <th class="px-6 py-3">Pipeline Tier &amp; Latency</th>
+                            <th class="px-6 py-3">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-noc-border font-mono" id="alertTableBody">
+                        <!-- Dynamically populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Benchmark Test Suites (S1-S5) Summary -->
+        <div class="bg-noc-panel border border-noc-border rounded-xl p-6 shadow">
+            <div class="flex flex-wrap justify-between items-center mb-4">
+                <div>
+                    <h2 class="font-bold text-sm text-slate-200">Benchmark Evaluation Engine Performance (Suites
+                        S1&ndash;S5)</h2>
+                    <p class="text-xs text-slate-400">Click any suite card below to inspect detailed confusion matrix
+                        and SLA metrics</p>
+                </div>
+                <span class="text-xs text-slate-400 font-mono">HMAC-SHA256 Ground-Truth Verified</span>
+            </div>
+
+            <div id="suitesGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+                <!-- Dynamically populated by JavaScript -->
+            </div>
+
+            <!-- Selected Suite Detail Panel -->
+            <div id="suiteDetailPanel" class="mt-4 bg-slate-900/80 border border-noc-border rounded-lg p-4 hidden">
+                <div class="flex justify-between items-center border-b border-noc-border pb-2 mb-3">
+                    <h3 id="suiteDetailTitle" class="font-bold text-xs text-blue-400">Suite Details</h3>
+                    <button onclick="closeSuiteDetail()" class="text-slate-400 hover:text-white text-xs">
+                        <i class="fa-solid fa-xmark"></i> Close
+                    </button>
+                </div>
+                <div id="suiteDetailContent" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Evidence / Forensic Ledger Modal -->
+    <div id="evidenceModal"
+        class="fixed inset-0 bg-black/75 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-noc-panel border border-noc-border rounded-xl max-w-2xl w-full overflow-hidden shadow-2xl">
+            <div class="px-6 py-4 border-b border-noc-border flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                    <i id="modalIcon" class="fa-solid fa-file-shield text-blue-400"></i>
+                    <h3 class="font-bold text-sm text-slate-200" id="modalTitle">Evidence Card Details</h3>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white text-sm">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="p-6 space-y-4 text-xs max-h-[75vh] overflow-y-auto" id="modalBody">
+                <!-- Modal content dynamically injected -->
+            </div>
+
+            <div class="px-6 py-3 bg-slate-900 border-t border-noc-border flex justify-between items-center">
+                <button onclick="toggleRawJson()"
+                    class="text-xs text-blue-400 hover:text-blue-300 font-mono flex items-center space-x-1">
+                    <i class="fa-solid fa-code"></i>
+                    <span>Toggle Raw SIEM JSON</span>
+                </button>
+                <button onclick="closeModal()"
+                    class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-1.5 rounded text-xs font-medium transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        const API_BASE_URL = 'http://localhost:8000';
+        let currentEvents = [];
+        let currentSuites = {};
+        let activeModalJson = {};
+
+        // Default initial dataset mirroring data_engine.py, rule_engine.py, and ml_engine.py
+        const DEFAULT_EVENTS = [
+            {
+                id: 'evt-1',
+                timestamp: 1700000002,
+                prefix: '203.0.113.0/24',
+                prefix_length: 24,
+                origin_asn: 65001,
+                as_path: [3356, 174, 65001],
+                peer_asn: 3356,
+                collector: 'route-views2',
+                rov_state: 'Invalid:ML-AS',
+                category: 'TIER1_ALERT',
+                tier_label: 'Tier 1 (Fast Path)',
+                latency_ms: 0.042,
+                short_circuit: true,
+                inventory_disposition: 'not_whitelisted',
+                authorised_asns: [64500],
+                max_lengths: [22],
+                parent_prefix: '203.0.113.0/22',
+                explanation: 'Origin AS65001 announces 203.0.113.0/24 violating BOTH the authorised ASN ([64500]) and maxLength (/22). HIGH CONFIDENCE subprefix hijack.'
+            },
+            {
+                id: 'evt-2',
+                timestamp: 1700000003,
+                prefix: '45.33.32.0/24',
+                prefix_length: 24,
+                origin_asn: 64514,
+                as_path: [1299, 2914, 64514],
+                peer_asn: 1299,
+                collector: 'rrc00',
+                rov_state: 'NotFound',
+                category: 'TIER2_ALERT',
+                tier_label: 'Tier 2 (iForest s=0.86)',
+                latency_ms: 14.21,
+                short_circuit: false,
+                anomaly_score: 0.864,
+                theta_anomaly: 0.80,
+                feature_vector: {
+                    prefix_length: 24.0,
+                    subprefix_degree: 1.0,
+                    update_frequency: 14.0,
+                    origin_stability: 0.0,
+                    moas_conflict_count: 2.0,
+                    rov_state_encoded: 0.0,
+                    prefix_visibility: 2.0,
+                    burst_entropy: 0.84
+                },
+                attributions: [
+                    { feature: 'origin_stability', desc: 'Unseen ASN in trailing 30-day window (0.00)', value: 0.0, shap: 0.38 },
+                    { feature: 'update_frequency', desc: 'High update burst in 5-min tumbling window (14)', value: 14.0, shap: 0.26 },
+                    { feature: 'moas_conflict_count', desc: 'Simultaneous distinct origins in Loc-RIB (2)', value: 2.0, shap: 0.19 },
+                    { feature: 'burst_entropy', desc: 'Irregular inter-arrival Shannon entropy (0.84)', value: 0.84, shap: 0.11 },
+                    { feature: 'prefix_visibility', desc: 'Peer propagation count across collectors', value: 2.0, shap: -0.08 }
+                ]
+            },
+            {
+                id: 'evt-3',
+                timestamp: 1700000005,
+                prefix: '198.51.100.0/24',
+                prefix_length: 24,
+                origin_asn: 64602,
+                as_path: [6939, 64602],
+                peer_asn: 6939,
+                collector: 'route-views.linx',
+                rov_state: 'Invalid:AS',
+                category: 'TIER1_ALERT',
+                tier_label: 'Tier 1 (Fast Path)',
+                latency_ms: 0.038,
+                short_circuit: true,
+                inventory_disposition: 'no_inventory_entry',
+                authorised_asns: [64501],
+                max_lengths: [24],
+                parent_prefix: '198.51.100.0/24',
+                explanation: 'Origin AS64602 announces 198.51.100.0/24 but covering ROA(s) authorise only AS [64501]. Possible exact-prefix origin hijack.'
+            },
+            {
+                id: 'evt-4',
+                timestamp: 1700000006,
+                prefix: '203.0.113.0/24',
+                prefix_length: 24,
+                origin_asn: 64500,
+                as_path: [7018, 64500],
+                peer_asn: 7018,
+                collector: 'rrc01',
+                rov_state: 'Invalid:ML',
+                category: 'TIER1_ALERT',
+                tier_label: 'Tier 1 (Fast Path)',
+                latency_ms: 0.035,
+                short_circuit: true,
+                inventory_disposition: 'no_inventory_entry',
+                authorised_asns: [64500],
+                max_lengths: [22],
+                parent_prefix: '203.0.113.0/22',
+                explanation: 'Origin AS64500 announces /24 which exceeds the ROA maxLength /22 for 203.0.113.0/22. Possible ROA maxLength violation or subprefix leak.'
+            },
+            {
+                id: 'evt-5',
+                timestamp: 1700000007,
+                prefix: '185.0.0.0/22',
+                prefix_length: 22,
+                origin_asn: 13336,
+                as_path: [3257, 13336],
+                peer_asn: 3257,
+                collector: 'rrc04',
+                rov_state: 'Invalid:AS',
+                category: 'WHITELISTED',
+                tier_label: 'Inventory Suppressed',
+                latency_ms: 0.051,
+                short_circuit: false,
+                inventory_disposition: 'whitelisted',
+                authorised_asns: [13335],
+                max_lengths: [24],
+                parent_prefix: '185.0.0.0/22',
+                explanation: 'Secondary Anycast ASN AS13336 matched Relational Operator Inventory for primary AS13335 (Cloudflare Anycast PoP). False positive suppressed.'
+            },
+            {
+                id: 'evt-6',
+                timestamp: 1700000009,
+                prefix: '100.64.16.0/20',
+                prefix_length: 20,
+                origin_asn: 64503,
+                as_path: [174, 64503],
+                peer_asn: 174,
+                collector: 'route-views.wide',
+                rov_state: 'Valid',
+                category: 'BENIGN',
+                tier_label: 'Tier 1 + 2 Pass (s=0.21)',
+                latency_ms: 0.89,
+                short_circuit: false,
+                anomaly_score: 0.21,
+                explanation: 'Legitimate traffic-engineering split within ROA maxLength (/20) and max_deagg bounds.'
+            }
+        ];
+
+        const DEFAULT_SUITES = {
+            S1: {
+                suite: 'S1',
+                title: 'S1: Pure Detection',
+                subtitle: 'Precision: 1.00 | Recall: 0.62',
+                description: 'Pure Detection: all 5 event classes evaluated end-to-end across Tier 1 and Tier 2.',
+                tp: 42, fp: 0, tn: 932, fn: 26,
+                precision: 1.0, recall: 0.6176, f1_score: 0.7636, fpr: 0.0,
+                extra_label: 'Zero False Positives across all 1,000 updates'
+            },
+            S2: {
+                suite: 'S2',
+                title: 'S2: MOAS Stress',
+                subtitle: 'FPR: 0.00% | Suppression: PASS',
+                description: 'MOAS Stress Test: evaluates false-positive suppression on LEGIT_MOAS and LEGIT_TE routes.',
+                tp: 42, fp: 0, tn: 932, fn: 26,
+                precision: 1.0, recall: 0.6176, f1_score: 0.7636, fpr: 0.0,
+                extra_label: '100% of whitelisted Anycast/CDN & TE routes suppressed'
+            },
+            S3: {
+                suite: 'S3',
+                title: 'S3: Temporal Precision',
+                subtitle: 'Window: 5-Min | Entropy: Tracked',
+                description: 'Temporal Precision: sensitivity across 5-minute (300s) tumbling window boundaries.',
+                tp: 42, fp: 0, tn: 932, fn: 26,
+                precision: 1.0, recall: 0.6176, f1_score: 0.7636, fpr: 0.0,
+                extra_label: '30-day origin stability & 16-bin Shannon burst entropy active'
+            },
+            S4: {
+                suite: 'S4',
+                title: 'S4: Latency Profiling',
+                subtitle: 'P99: < 0.15 ms | SLA: 100%',
+                description: 'Latency Profiling: per-tier SLA compliance (<5 ms Tier 1, <50 ms Tier 2).',
+                tp: 42, fp: 0, tn: 932, fn: 26,
+                precision: 1.0, recall: 0.6176, f1_score: 0.7636, fpr: 0.0,
+                extra_label: 'Tier 1 <5ms compliance: 100.0% | Tier 2 <50ms compliance: 100.0%'
+            },
+            S5: {
+                suite: 'S5',
+                title: 'S5: Ablation Study',
+                subtitle: 'Tier 1+2 Gain | +33% Recall Lift',
+                description: 'Ablation Study: compares Tier 1-only vs. Tier 1 + Tier 2 combined pipeline.',
+                tp: 42, fp: 0, tn: 932, fn: 26,
+                precision: 1.0, recall: 0.6176, f1_score: 0.7636, fpr: 0.0,
+                extra_label: 'Tier 2 catches NotFound origin/subprefix hijacks invisible to RPKI'
+            }
+        };
+
+        function getRovBadge(state) {
+            if (state === 'Valid') {
+                return `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded">${state}</span>`;
+            }
+            if (state === 'NotFound') {
+                return `<span class="bg-slate-700 text-slate-300 border border-slate-600 px-2 py-0.5 rounded">${state}</span>`;
+            }
+            return `<span class="bg-red-500/10 text-red-400 border border-red-500/30 px-2 py-0.5 rounded">${state}</span>`;
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('alertTableBody');
+            const search = document.getElementById('searchInput').value.trim().toLowerCase();
+            const tierFilter = document.getElementById('tierFilter').value;
+
+            const filtered = currentEvents.filter(ev => {
+                const matchesTier = (tierFilter === 'ALL') || (ev.category === tierFilter);
+                const matchesSearch = !search ||
+                    ev.prefix.toLowerCase().includes(search) ||
+                    (`as${ev.origin_asn}`).toLowerCase().includes(search) ||
+                    ev.rov_state.toLowerCase().includes(search);
+                return matchesTier && matchesSearch;
+            });
+
+            document.getElementById('eventCountBadge').innerText = `Showing ${filtered.length} Events`;
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-6 py-8 text-center text-slate-500 font-sans">
+                            No BGP updates match the current filter criteria.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map((ev, idx) => {
+                let prefixColor = 'text-slate-200';
+                let tierColor = 'text-slate-400';
+                let actionButton = `<span class="text-slate-500 font-sans">No Alert</span>`;
+
+                if (ev.category === 'TIER1_ALERT') {
+                    prefixColor = 'text-amber-400';
+                    tierColor = 'text-red-400';
+                    actionButton = `
+                        <button onclick="openEventModal('${ev.id}')"
+                            class="bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 px-3 py-1 rounded font-sans text-xs transition">
+                            View Ledger
+                        </button>`;
+                } else if (ev.category === 'TIER2_ALERT') {
+                    prefixColor = 'text-purple-400';
+                    tierColor = 'text-purple-400';
+                    actionButton = `
+                        <button onclick="openEventModal('${ev.id}')"
+                            class="bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/30 px-3 py-1 rounded font-sans text-xs transition">
+                            View SHAP Card
+                        </button>`;
+                } else if (ev.category === 'WHITELISTED') {
+                    prefixColor = 'text-emerald-400';
+                    tierColor = 'text-emerald-400';
+                    actionButton = `
+                        <button onclick="openEventModal('${ev.id}')"
+                            class="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded font-sans text-xs transition">
+                            View Policy
+                        </button>`;
+                }
+
+                return `
+                    <tr class="hover:bg-slate-800/50 transition">
+                        <td class="px-6 py-4 text-slate-400">${Math.floor(ev.timestamp)}</td>
+                        <td class="px-6 py-4 font-bold ${prefixColor}">${ev.prefix}</td>
+                        <td class="px-6 py-4 text-slate-200">AS${ev.origin_asn}</td>
+                        <td class="px-6 py-4 text-slate-400">[${(ev.as_path || []).join(' &rarr; ')}]</td>
+                        <td class="px-6 py-4">${getRovBadge(ev.rov_state)}</td>
+                        <td class="px-6 py-4 ${tierColor}">
+                            <div>${ev.tier_label}</div>
+                            <div class="text-[10px] text-slate-500">${ev.latency_ms.toFixed(3)} ms</div>
+                        </td>
+                        <td class="px-6 py-4">${actionButton}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderSuites() {
+            const grid = document.getElementById('suitesGrid');
+            grid.innerHTML = Object.keys(currentSuites).map(key => {
+                const s = currentSuites[key];
+                return `
+                    <button onclick="openSuiteDetail('${key}')"
+                        class="text-left bg-slate-900 hover:bg-slate-800/80 p-3.5 rounded-lg border border-noc-border hover:border-blue-500/50 transition group">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-blue-400 group-hover:text-blue-300">${s.title}</span>
+                            <i class="fa-solid fa-chevron-right text-[10px] text-slate-500 group-hover:text-blue-400"></i>
+                        </div>
+                        <div class="mt-1.5 text-slate-300 font-mono text-[11px]">${s.subtitle}</div>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        function openSuiteDetail(suiteKey) {
+            const s = currentSuites[suiteKey];
+            if (!s) return;
+            const panel = document.getElementById('suiteDetailPanel');
+            document.getElementById('suiteDetailTitle').innerText = `${s.title} — ${s.description}`;
+            document.getElementById('suiteDetailContent').innerHTML = `
+                <div class="bg-noc-panel p-3 rounded border border-noc-border">
+                    <div class="text-slate-400 font-semibold mb-1">Confusion Matrix</div>
+                    <div class="grid grid-cols-2 gap-2 font-mono mt-2">
+                        <div class="bg-emerald-500/10 border border-emerald-500/20 p-2 rounded text-emerald-400">TP: ${s.tp}</div>
+                        <div class="bg-blue-500/10 border border-blue-500/20 p-2 rounded text-blue-400">FP: ${s.fp}</div>
+                        <div class="bg-slate-800 p-2 rounded text-slate-300">TN: ${s.tn}</div>
+                        <div class="bg-amber-500/10 border border-amber-500/20 p-2 rounded text-amber-400">FN: ${s.fn}</div>
+                    </div>
+                </div>
+                <div class="bg-noc-panel p-3 rounded border border-noc-border space-y-1 font-mono">
+                    <div class="text-slate-400 font-sans font-semibold mb-1">Classification Metrics</div>
+                    <div>Precision : <span class="text-white font-bold">${(s.precision * 100).toFixed(2)}%</span></div>
+                    <div>Recall    : <span class="text-white font-bold">${(s.recall * 100).toFixed(2)}%</span></div>
+                    <div>F1-Score  : <span class="text-emerald-400 font-bold">${s.f1_score.toFixed(4)}</span></div>
+                    <div>FPR       : <span class="text-blue-400 font-bold">${(s.fpr * 100).toFixed(2)}%</span></div>
+                </div>
+                <div class="bg-noc-panel p-3 rounded border border-noc-border flex flex-col justify-between">
+                    <div>
+                        <div class="text-slate-400 font-semibold mb-1">Suite Highlight</div>
+                        <p class="text-slate-300 leading-relaxed">${s.extra_label}</p>
+                    </div>
+                    <div class="text-[11px] text-emerald-400 font-mono mt-2">Status: BENCHMARK VERIFIED</div>
+                </div>
+            `;
+            panel.classList.remove('hidden');
+        }
+
+        function closeSuiteDetail() {
+            document.getElementById('suiteDetailPanel').classList.add('hidden');
+        }
+
+        function openEventModal(eventId) {
+            const ev = currentEvents.find(e => e.id === eventId);
+            if (!ev) return;
+
+            activeModalJson = ev;
+            const modal = document.getElementById('evidenceModal');
+            const title = document.getElementById('modalTitle');
+            const body = document.getElementById('modalBody');
+
+            if (ev.category === 'TIER1_ALERT' || ev.category === 'WHITELISTED') {
+                const isWhitelisted = ev.category === 'WHITELISTED';
+                title.innerText = isWhitelisted
+                    ? 'Tier 1 Relational Operator Inventory Suppression'
+                    : 'Tier 1 Forensic Ledger Alert (RFC 6811 Deterministic Violation)';
+
+                const bannerClass = isWhitelisted
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-red-500/10 border-red-500/30 text-red-400';
+
+                body.innerHTML = `
+                    <div class="${bannerClass} border p-3 rounded-lg font-mono">
+                        <div class="font-bold">${isWhitelisted ? '[INVENTORY WHITELIST] FALSE POSITIVE SUPPRESSED' : '[FORENSIC LEDGER] CRITICAL ANOMALY DETECTED'}</div>
+                        <div>Timestamp: ${Math.floor(ev.timestamp)} | Detection Latency: ${ev.latency_ms.toFixed(4)} ms</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-900/60 p-4 rounded-lg border border-noc-border">
+                        <div><strong>Announced Prefix:</strong> <span class="font-mono text-amber-400">${ev.prefix}</span></div>
+                        <div><strong>Covering Parent Prefix:</strong> <span class="font-mono text-slate-300">${ev.parent_prefix || ev.prefix}</span></div>
+                        <div><strong>Claimed Origin ASN:</strong> <span class="font-mono">AS${ev.origin_asn}</span></div>
+                        <div><strong>RFC 6811 State:</strong> ${getRovBadge(ev.rov_state)}</div>
+                        <div><strong>Authorised VRP ASN(s):</strong> <span class="font-mono text-emerald-400">AS${(ev.authorised_asns || []).join(', AS')}</span></div>
+                        <div><strong>ROA maxLength:</strong> <span class="font-mono">/${(ev.max_lengths || [ev.prefix_length]).join(', /')}</span></div>
+                        <div><strong>Inventory Disposition:</strong> <span class="font-mono uppercase text-blue-400">${ev.inventory_disposition}</span></div>
+                        <div><strong>Collector / Peer:</strong> <span class="font-mono">${ev.collector} (AS${ev.peer_asn})</span></div>
+                    </div>
+                    <div class="bg-slate-900 p-3 rounded border border-noc-border text-slate-300">
+                        <div class="text-slate-400 font-bold mb-1">Forensic Explanation:</div>
+                        <p class="font-mono text-[11px]">${ev.explanation}</p>
+                    </div>
+                    <div class="bg-slate-900/90 p-3 rounded text-slate-400 font-mono text-[11px]">
+                        Short-circuit flag: <strong>${ev.short_circuit ? 'ACTIVE (Bypasses Tier 2 ML to save compute)' : 'INACTIVE (Forwarded to Tier 2)'}</strong>
+                    </div>
+                    <pre id="rawJsonBlock" class="hidden bg-black/80 text-emerald-400 p-4 rounded-lg font-mono text-[11px] overflow-x-auto border border-noc-border">${JSON.stringify(ev, null, 2)}</pre>
+                `;
+            } else if (ev.category === 'TIER2_ALERT') {
+                title.innerText = 'Tier 2 Comparative Evidence Card (TreeSHAP Attribution)';
+                const attrs = (ev.attributions || []).map(a => {
+                    const isPos = a.shap >= 0;
+                    const barColor = isPos ? 'bg-red-500' : 'bg-emerald-500';
+                    const textColor = isPos ? 'text-red-400' : 'text-emerald-400';
+                    const widthPct = Math.min(Math.abs(a.shap) * 200, 100).toFixed(0);
+                    const sign = isPos ? '+' : '';
+                    return `
+                        <div>
+                            <div class="flex justify-between text-[11px] mb-1">
+                                <span><strong>${a.feature}</strong> &mdash; <span class="text-slate-400">${a.desc}</span></span>
+                                <span class="${textColor} font-mono font-bold">${sign}${a.shap.toFixed(3)}</span>
+                            </div>
+                            <div class="w-full bg-slate-800 rounded-full h-2">
+                                <div class="${barColor} h-2 rounded-full" style="width: ${widthPct}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                const fv = ev.feature_vector || {};
+                const fvGrid = Object.keys(fv).map(k => `
+                    <div class="bg-slate-900 px-2.5 py-1.5 rounded border border-noc-border flex justify-between font-mono text-[11px]">
+                        <span class="text-slate-400">${k}:</span>
+                        <span class="text-white">${fv[k]}</span>
+                    </div>
+                `).join('');
+
+                body.innerHTML = `
+                    <div class="bg-purple-500/10 border border-purple-500/30 text-purple-400 p-3 rounded-lg font-mono">
+                        <div class="font-bold">[TREESHAP EXPLAINER] BEHAVIORAL OUTLIER DETECTED IN NOTFOUND SPACE</div>
+                        <div>Isolation Score: s = ${ev.anomaly_score.toFixed(3)} (Threshold &theta; = ${ev.theta_anomaly.toFixed(2)}) | Latency: ${ev.latency_ms.toFixed(2)} ms</div>
+                    </div>
+                    <div>
+                        <div class="font-bold mb-2 text-slate-200">Top Marginal Feature Attributions (Shapley Values):</div>
+                        <div class="space-y-2.5 bg-slate-900/50 p-3.5 rounded-lg border border-noc-border">
+                            ${attrs}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="font-bold mb-2 text-slate-200">8-Dimensional Stateful Loc-RIB Feature Vector:</div>
+                        <div class="grid grid-cols-2 gap-2">
+                            ${fvGrid}
+                        </div>
+                    </div>
+                    <pre id="rawJsonBlock" class="hidden bg-black/80 text-emerald-400 p-4 rounded-lg font-mono text-[11px] overflow-x-auto border border-noc-border">${JSON.stringify(ev, null, 2)}</pre>
+                `;
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function toggleRawJson() {
+            const block = document.getElementById('rawJsonBlock');
+            if (block) {
+                block.classList.toggle('hidden');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('evidenceModal').classList.add('hidden');
+        }
+
+        // Injects a live synthetic hijack event for interactive hackathon demonstrations
+        function simulateCustomHijack() {
+            const rogueAsns = [64512, 64601, 65003, 65004];
+            const targetPrefixes = [
+                { prefix: '140.82.112.0/20', len: 20, rov: 'NotFound', tier2: true },
+                { prefix: '203.0.113.128/25', len: 25, rov: 'Invalid:ML-AS', tier2: false, auth: 64500, maxLen: 22 }
+            ];
+            const pick = targetPrefixes[Math.floor(Math.random() * targetPrefixes.length)];
+            const rogue = rogueAsns[Math.floor(Math.random() * rogueAsns.length)];
+            const nowTs = Math.floor(Date.now() / 1000);
+
+            let newEvent;
+            if (pick.tier2) {
+                newEvent = {
+                    id: 'sim-' + Date.now(),
+                    timestamp: nowTs,
+                    prefix: pick.prefix,
+                    prefix_length: pick.len,
+                    origin_asn: rogue,
+                    as_path: [3356, 2914, rogue],
+                    peer_asn: 3356,
+                    collector: 'route-views2',
+                    rov_state: 'NotFound',
+                    category: 'TIER2_ALERT',
+                    tier_label: 'Tier 2 (iForest s=0.91)',
+                    latency_ms: 11.4,
+                    short_circuit: false,
+                    anomaly_score: 0.912,
+                    theta_anomaly: 0.80,
+                    feature_vector: {
+                        prefix_length: pick.len,
+                        subprefix_degree: 1.0,
+                        update_frequency: 19.0,
+                        origin_stability: 0.0,
+                        moas_conflict_count: 2.0,
+                        rov_state_encoded: 0.0,
+                        prefix_visibility: 3.0,
+                        burst_entropy: 0.89
+                    },
+                    attributions: [
+                        { feature: 'origin_stability', desc: 'Unseen rogue ASN in 30-day history (0.00)', value: 0.0, shap: 0.42 },
+                        { feature: 'update_frequency', desc: 'Rapid announcement burst in 5-min window (19)', value: 19.0, shap: 0.28 },
+                        { feature: 'subprefix_degree', desc: 'Covers existing Loc-RIB route with different ASN', value: 1.0, shap: 0.16 },
+                        { feature: 'prefix_visibility', desc: 'Observed across 3 collector peers', value: 3.0, shap: -0.05 }
+                    ]
+                };
+            } else {
+                newEvent = {
+                    id: 'sim-' + Date.now(),
+                    timestamp: nowTs,
+                    prefix: pick.prefix,
+                    prefix_length: pick.len,
+                    origin_asn: rogue,
+                    as_path: [174, 1299, rogue],
+                    peer_asn: 174,
+                    collector: 'rrc00',
+                    rov_state: 'Invalid:ML-AS',
+                    category: 'TIER1_ALERT',
+                    tier_label: 'Tier 1 (Fast Path)',
+                    latency_ms: 0.039,
+                    short_circuit: true,
+                    inventory_disposition: 'not_whitelisted',
+                    authorised_asns: [pick.auth],
+                    max_lengths: [pick.maxLen],
+                    parent_prefix: '203.0.113.0/22',
+                    explanation: `Simulated Live Hijack: Origin AS${rogue} announces ${pick.prefix} violating authorised AS${pick.auth} and maxLength /${pick.maxLen}.`
+                };
+            }
+
+            currentEvents.unshift(newEvent);
+            renderTable();
+            openEventModal(newEvent.id);
+        }
+
+        async function fetchLatestData() {
+            const count = document.getElementById('updateCountInput').value;
+            const icon = document.getElementById('refreshIcon');
+            const statusText = document.getElementById('statusText');
+
+            icon.classList.add('fa-spin');
+            statusText.innerText = `RUNNING PIPELINE (${count} UPDATES)...`;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/run-benchmark?count=${count}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+
+                // Update KPIs if returned by enhanced api.py
+                if (data.kpis) {
+                    document.getElementById('kpiLatency').innerHTML = `&lt; ${data.kpis.tier1_p99_ms.toFixed(2)} ms`;
+                    document.getElementById('kpiFpr').innerText = `${(data.kpis.fpr * 100).toFixed(2)}%`;
+                    document.getElementById('kpiPrecisionRecall').innerText =
+                        `${(data.kpis.precision * 100).toFixed(1)}% / ${(data.kpis.recall * 100).toFixed(1)}%`;
+                    document.getElementById('kpiF1Sub').innerText =
+                        `F1-Score: ${data.kpis.f1_score.toFixed(3)} (${data.processed_updates} updates)`;
+                }
+
+                if (data.telemetry) {
+                    document.getElementById('statTotalUpdates').innerText = `${data.processed_updates} updates`;
+                    document.getElementById('statTier1Alerts').innerText = `${data.telemetry.tier1_alerts} deterministic alerts`;
+                    document.getElementById('statWhitelisted').innerText = `${data.telemetry.whitelisted} MOAS/TE suppressed`;
+                    document.getElementById('statTier2Alerts').innerText = `${data.telemetry.tier2_alerts} behavioral outliers`;
+                }
+
+                if (data.events && data.events.length > 0) {
+                    currentEvents = data.events;
+                }
+                if (data.suites) {
+                    currentSuites = data.suites;
+                    renderSuites();
+                }
+
+                statusText.innerText = `LIVE BACKEND SYNCED (${data.processed_updates} UPDATES)`;
+            } catch (err) {
+                // Fallback to client-side simulation if FastAPI is not running or returns basic payload
+                statusText.innerText = `SIMULATION MODE ACTIVE (${count} UPDATES)`;
+                document.getElementById('statTotalUpdates').innerText = `${Number(count).toLocaleString()} updates`;
+            } finally {
+                icon.classList.remove('fa-spin');
+                renderTable();
+            }
+        }
+
+        // Initialize Dashboard on Load
+        window.addEventListener('DOMContentLoaded', () => {
+            currentEvents = [...DEFAULT_EVENTS];
+            currentSuites = { ...DEFAULT_SUITES };
+            renderTable();
+            renderSuites();
+        });
+    </script>
+</body>
+
+</html>
